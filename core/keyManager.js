@@ -1,3 +1,5 @@
+import { saveToDB, getFromDB, getAllFromDB } from "./storage.js";
+
 // dCent Core – Key Management
 
 const DB_NAME = "dcentDB";
