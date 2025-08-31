@@ -1,16 +1,20 @@
 // dCent Core – Key Management
 
 const DB_NAME = "dcentDB";
+const DB_VERSION = 2;  // Einheitlich mit contractManager
 const STORE_NAME = "keys";
 
 // IndexedDB öffnen
 function openDB() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: "id" });
+      if (!db.objectStoreNames.contains("keys")) {
+        db.createObjectStore("keys", { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains("contracts")) {
+        db.createObjectStore("contracts", { keyPath: "id" });
       }
     };
     request.onsuccess = (event) => resolve(event.target.result);
