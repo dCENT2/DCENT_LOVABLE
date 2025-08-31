@@ -1,7 +1,6 @@
-// DeZent Core – Key Management
-// Speichert Keys lokal in IndexedDB
+// dCent Core – Key Management
 
-const DB_NAME = "dezentDB";
+const DB_NAME = "dcentDB";
 const STORE_NAME = "keys";
 
 // IndexedDB öffnen
@@ -48,6 +47,18 @@ export async function listKeys() {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readonly");
     const request = tx.objectStore(STORE_NAME).getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+// Einzelnen Key abrufen (hier fehlte export!)
+export async function getKey(identityName = "default") {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const store = tx.objectStore(STORE_NAME);
+    const request = store.get(identityName);
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
