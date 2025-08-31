@@ -8,12 +8,13 @@
     button { margin: 5px; padding: 8px 12px; }
     .box { border: 1px solid #ccc; padding: 10px; margin-top: 20px; }
     input { margin: 5px; padding: 5px; }
-    pre { background: #f8f8f8; padding: 10px; }
+    pre { background: #f8f8f8; padding: 10px; white-space: pre-wrap; }
   </style>
 </head>
 <body>
   <h1>dCent Demo</h1>
 
+  <!-- Identitäten -->
   <div class="box">
     <h3>Identität</h3>
     <input id="peerName" placeholder="Peer-Name (z.B. alice)" />
@@ -22,6 +23,7 @@
     <pre id="keysOutput"></pre>
   </div>
 
+  <!-- Verträge -->
   <div class="box">
     <h3>Vertrag</h3>
     <input id="fromPeer" placeholder="Von (z.B. alice)" />
@@ -33,18 +35,27 @@
     <pre id="contractsOutput"></pre>
   </div>
 
+  <!-- TrustScores -->
   <div class="box">
     <h3>TrustScores</h3>
     <button onclick="showTrustScores()">TrustScores berechnen</button>
     <pre id="trustOutput"></pre>
   </div>
 
+  <!-- Entschlüsselung -->
+  <div class="box">
+    <h3>Vertrag entschlüsseln</h3>
+    <input id="decryptPeer" placeholder="Peer (z.B. alice)" />
+    <button onclick="decryptFirst()">Ersten Vertrag entschlüsseln</button>
+    <pre id="decryptOutput"></pre>
+  </div>
+
   <script type="module">
     import { createKeyPair, listKeys } from "./core/keyManager.js";
-    import { createContract, listContracts } from "./core/contractManager.js";
+    import { createContract, listContracts, decryptContract } from "./core/contractManager.js";
     import { calculateTrustScores } from "./core/trustGraph.js";
 
-    // UI: Neue Identität
+    // Identität erzeugen
     window.createIdentity = async () => {
       const name = document.getElementById("peerName").value.trim();
       if (!name) return alert("Bitte einen Namen eingeben!");
@@ -53,13 +64,13 @@
       console.log(pubKey);
     };
 
-    // UI: Alle Keys anzeigen
+    // Keys anzeigen
     window.showKeys = async () => {
       const keys = await listKeys();
       document.getElementById("keysOutput").innerText = JSON.stringify(keys, null, 2);
     };
 
-    // UI: Vertrag anlegen
+    // Vertrag anlegen
     window.createContractUI = async () => {
       const from = document.getElementById("fromPeer").value.trim();
       const to = document.getElementById("toPeer").value.trim();
@@ -70,16 +81,30 @@
       alert("Vertrag erstellt: " + ctr.id);
     };
 
-    // UI: Alle Verträge anzeigen
+    // Verträge anzeigen (verschlüsselt)
     window.showContracts = async () => {
       const ctrs = await listContracts();
       document.getElementById("contractsOutput").innerText = JSON.stringify(ctrs, null, 2);
     };
 
-    // UI: TrustScores berechnen
+    // TrustScores anzeigen
     window.showTrustScores = async () => {
       const scores = await calculateTrustScores();
       document.getElementById("trustOutput").innerText = JSON.stringify(scores, null, 2);
+    };
+
+    // Vertrag entschlüsseln
+    window.decryptFirst = async () => {
+      const peer = document.getElementById("decryptPeer").value.trim();
+      if (!peer) return alert("Bitte Peer-Namen eingeben!");
+      const ctrs = await listContracts();
+      if (ctrs.length === 0) return alert("Keine Verträge gefunden");
+      try {
+        const plain = await decryptContract(ctrs[0], peer);
+        document.getElementById("decryptOutput").innerText = JSON.stringify(plain, null, 2);
+      } catch (err) {
+        alert("Fehler: " + err.message);
+      }
     };
   </script>
 </body>
