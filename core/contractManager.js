@@ -40,17 +40,24 @@ async function encryptKeyForPeer(aesKey, peer) {
   const peerKey = await getKey(peer);
   if (!peerKey) throw new Error(`Kein Key für ${peer}`);
 
-  const publicKey = await crypto.subtle.importKey(
-    "jwk",
-    peerKey.publicKey,
-    { name: "ECDSA", namedCurve: "P-256" },
-    true,
-    ["verify"]
-  );
-
-  // Exportiere AES-Key und verschlüssele mit peer Public Key → simuliert mit JSON
+  // hier vereinfachte Variante: AES-Key als JWK exportieren + Base64 speichern
   const rawKey = await crypto.subtle.exportKey("jwk", aesKey);
-  return btoa(JSON.stringify(rawKey)); // hier vereinfachte Variante
+  return btoa(JSON.stringify(rawKey));
+}
+
+async function decryptKeyForPeer(encryptedKeyB64, peer) {
+  const peerKey = await getKey(peer);
+  if (!peerKey) throw new Error(`Kein Key für ${peer}`);
+
+  // vereinfachtes Importieren
+  const rawKey = JSON.parse(atob(encryptedKeyB64));
+  return await crypto.subtle.importKey(
+    "jwk",
+    rawKey,
+    { name: "AES-GCM" },
+    true,
+    ["encrypt", "decrypt"]
+  );
 }
 
 // Vertrag erzeugen & verschlüsseln
@@ -80,14 +87,31 @@ export async function createContract(fromId, toId, content, amount = 0) {
     encryptedContent: encrypted.ciphertext,
     iv: encrypted.iv,
     encryptedKeys,
-    signature: "todo_sign", // wir können zusätzlich noch signieren
+    signature: "todo_sign", // hier später echte Signatur
   };
 
   await saveToDB(STORE_NAME, contract);
   return contract;
 }
 
-// Alle Verträge abrufen
+// Alle Verträge abrufen (verschlüsselt)
 export async function listContracts() {
   return await getAllFromDB(STORE_NAME);
+}
+
+// Vertrag entschlüsseln für einen Peer
+export async function decryptContract(contract, peerId) {
+  // prüfen, ob Peer beteiligt ist
+  if (contract.from !== peerId && contract.to !== peerId) {
+    throw new Error("Peer ist nicht Teil dieses Vertrags");
+  }
+
+  const encryptedKey = contract.encryptedKeys[peerId];
+  const aesKey = await decryptKeyForPeer(encryptedKey, peerId);
+
+  const plaintext = await decryptAES(aesKey, contract.encryptedContent, contract.iv);
+  return {
+    ...contract,
+    content: plaintext,
+  };
 }
