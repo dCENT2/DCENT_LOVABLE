@@ -7,7 +7,7 @@
     body { font-family: Arial, sans-serif; margin: 20px; }
     button { margin: 5px; padding: 8px 12px; }
     .box { border: 1px solid #ccc; padding: 10px; margin-top: 20px; }
-    input { margin: 5px; padding: 5px; }
+    input, select { margin: 5px; padding: 5px; }
     pre { background: #f8f8f8; padding: 10px; white-space: pre-wrap; }
   </style>
 </head>
@@ -26,8 +26,10 @@
   <!-- Verträge -->
   <div class="box">
     <h3>Vertrag</h3>
-    <input id="fromPeer" placeholder="Von (z.B. alice)" />
-    <input id="toPeer" placeholder="Zu (z.B. bob)" />
+    <label>Von:</label>
+    <select id="fromPeer"></select>
+    <label>Zu:</label>
+    <select id="toPeer"></select><br/>
     <input id="contractText" placeholder="Vertragsinhalt" />
     <input id="amount" placeholder="Betrag" type="number" />
     <button onclick="createContractUI()">Vertrag anlegen</button>
@@ -45,23 +47,43 @@
   <!-- Entschlüsselung -->
   <div class="box">
     <h3>Vertrag entschlüsseln</h3>
-    <input id="decryptPeer" placeholder="Peer (z.B. alice)" />
+    <label>Peer:</label>
+    <select id="decryptPeer"></select>
     <button onclick="decryptFirst()">Ersten Vertrag entschlüsseln</button>
     <pre id="decryptOutput"></pre>
   </div>
 
   <script type="module">
-    import { createKeyPair, listKeys } from "./core/keyManager.js";
+    import { createKeyPair, listKeys, formatPeerLabel } from "./core/keyManager.js";
     import { createContract, listContracts, decryptContract } from "./core/contractManager.js";
     import { calculateTrustScores } from "./core/trustGraph.js";
+
+    // Dropdowns aktualisieren
+    async function refreshPeerDropdowns() {
+      const peers = await listKeys();
+      const fromSelect = document.getElementById("fromPeer");
+      const toSelect = document.getElementById("toPeer");
+      const decryptSelect = document.getElementById("decryptPeer");
+
+      [fromSelect, toSelect, decryptSelect].forEach(sel => sel.innerHTML = "");
+
+      peers.forEach(peer => {
+        const option = document.createElement("option");
+        option.value = peer.id; // volle Peer-ID
+        option.text = formatPeerLabel(peer); // Name [ShortID]
+        fromSelect.appendChild(option.cloneNode(true));
+        toSelect.appendChild(option.cloneNode(true));
+        decryptSelect.appendChild(option.cloneNode(true));
+      });
+    }
 
     // Identität erzeugen
     window.createIdentity = async () => {
       const name = document.getElementById("peerName").value.trim();
       if (!name) return alert("Bitte einen Namen eingeben!");
-      const pubKey = await createKeyPair(name);
-      alert("Identität erstellt: " + name);
-      console.log(pubKey);
+      const peer = await createKeyPair(name);
+      alert("Identität erstellt: " + formatPeerLabel(peer));
+      await refreshPeerDropdowns();
     };
 
     // Keys anzeigen
@@ -72,8 +94,8 @@
 
     // Vertrag anlegen
     window.createContractUI = async () => {
-      const from = document.getElementById("fromPeer").value.trim();
-      const to = document.getElementById("toPeer").value.trim();
+      const from = document.getElementById("fromPeer").value;
+      const to = document.getElementById("toPeer").value;
       const text = document.getElementById("contractText").value.trim();
       const amount = parseFloat(document.getElementById("amount").value);
       if (!from || !to || !text) return alert("Alle Felder ausfüllen!");
@@ -95,8 +117,7 @@
 
     // Vertrag entschlüsseln
     window.decryptFirst = async () => {
-      const peer = document.getElementById("decryptPeer").value.trim();
-      if (!peer) return alert("Bitte Peer-Namen eingeben!");
+      const peer = document.getElementById("decryptPeer").value;
       const ctrs = await listContracts();
       if (ctrs.length === 0) return alert("Keine Verträge gefunden");
       try {
@@ -106,6 +127,9 @@
         alert("Fehler: " + err.message);
       }
     };
+
+    // Bei Start Dropdowns laden
+    refreshPeerDropdowns();
   </script>
 </body>
 </html>
