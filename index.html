@@ -116,14 +116,21 @@
       const to = document.getElementById("toPeer").value;
       const text = document.getElementById("contractText").value.trim();
       const amount = parseFloat(document.getElementById("amount").value) || 0;
-      const collateral = parseFloat(document.getElementById("collateral").value) || 0;
+
+      // Collateral-Feld korrekt behandeln
+      const collateralInput = document.getElementById("collateral").value;
+      const collateral = collateralInput !== "" ? parseFloat(collateralInput) : 0;
+
+      console.log("DEBUG → collateralAmount an createContract übergeben:", collateral);
 
       if (!from || !to || !text) return alert("Alle Felder ausfüllen!");
 
       try {
         const ctr = await createContract(from, to, text, amount, collateral);
+        console.log("DEBUG → Vertrag gespeichert:", ctr);
         alert("Vertrag erstellt: " + ctr.id);
       } catch (err) {
+        console.error("DEBUG → Fehler beim Vertrag:", err);
         alert("Fehler beim Vertrag: " + err.message);
       }
     };
@@ -131,10 +138,11 @@
     // Verträge anzeigen
     window.showContracts = async () => {
       const ctrs = await listContracts();
+      console.log("DEBUG → Verträge aus DB:", ctrs);
       document.getElementById("contractsOutput").innerText = JSON.stringify(ctrs, null, 2);
     };
 
-    // TrustScores berechnen (Basis + Bonus anzeigen)
+    // TrustScores berechnen
     window.showTrustScores = async () => {
       const contracts = await listContracts();
       const scores = {};
@@ -147,7 +155,9 @@
           const fromCollateral = contract.collateral.from || 0;
           const toCollateral = contract.collateral.to || 0;
           const totalCollateral = fromCollateral + toCollateral;
-          bonus = Math.min(20, totalCollateral * 2);
+          if (totalCollateral > 0) {
+            bonus = Math.min(20, totalCollateral * 2);
+          }
         }
 
         [contract.from, contract.to].forEach(peer => {
@@ -160,7 +170,6 @@
         });
       });
 
-      // Ausgabe formatieren
       let output = "";
       for (const peer in scores) {
         output += `${peer} → Gesamt: ${scores[peer]} (Basis: ${details[peer].base}, Collateral-Bonus: ${details[peer].bonus})\n`;
