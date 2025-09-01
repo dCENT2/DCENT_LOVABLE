@@ -110,14 +110,16 @@
       document.getElementById("keysOutput").innerText = JSON.stringify(keys, null, 2);
     };
 
-    // Vertrag anlegen
+    // Vertrag anlegen (inkl. Collateral)
     window.createContractUI = async () => {
       const from = document.getElementById("fromPeer").value;
       const to = document.getElementById("toPeer").value;
       const text = document.getElementById("contractText").value.trim();
-      const amount = parseFloat(document.getElementById("amount").value);
+      const amount = parseFloat(document.getElementById("amount").value) || 0;
       const collateral = parseFloat(document.getElementById("collateral").value) || 0;
+
       if (!from || !to || !text) return alert("Alle Felder ausfüllen!");
+
       try {
         const ctr = await createContract(from, to, text, amount, collateral);
         alert("Vertrag erstellt: " + ctr.id);
@@ -132,7 +134,7 @@
       document.getElementById("contractsOutput").innerText = JSON.stringify(ctrs, null, 2);
     };
 
-    // TrustScores berechnen (mit Collateral-Erklärung)
+    // TrustScores berechnen (Basis + Bonus anzeigen)
     window.showTrustScores = async () => {
       const contracts = await listContracts();
       const scores = {};
@@ -141,7 +143,7 @@
       contracts.forEach(contract => {
         const basePoints = 10;
         let bonus = 0;
-        if (contract.collateral && contract.collateral.status === "locked") {
+        if (contract.collateral) {
           const fromCollateral = contract.collateral.from || 0;
           const toCollateral = contract.collateral.to || 0;
           const totalCollateral = fromCollateral + toCollateral;
