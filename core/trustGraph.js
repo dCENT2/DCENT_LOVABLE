@@ -1,5 +1,5 @@
 // dCent Core – TrustGraph
-// Berechnet Proof-of-Trust Scores aus Verträgen
+// Berechnet Proof-of-Trust Scores aus Verträgen (inkl. Collateral-Bonus)
 
 import { listContracts } from "./contractManager.js";
 
@@ -16,15 +16,18 @@ export async function calculateTrustScores() {
     // Basis-Punkte pro Vertrag
     const basePoints = 10;
 
-    // Bonus für Verträge mit Collateral
+    // Bonus berechnen, wenn Collateral gesetzt wurde
     let bonus = 0;
     if (contract.collateral) {
       const fromCollateral = contract.collateral.from || 0;
       const toCollateral = contract.collateral.to || 0;
       const totalCollateral = fromCollateral + toCollateral;
-      bonus = Math.min(20, totalCollateral * 2); // z. B. 2 Punkte pro DZP, max 20
+      if (totalCollateral > 0) {
+        bonus = Math.min(20, totalCollateral * 2); // z.B. 2 Punkte pro DZP, max 20
+      }
     }
 
+    // Punkte gutschreiben für beide Parteien
     [from, to].forEach(peer => {
       if (!scores[peer]) scores[peer] = 0;
       if (!details[peer]) details[peer] = { base: 0, bonus: 0 };
