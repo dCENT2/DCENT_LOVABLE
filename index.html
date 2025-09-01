@@ -53,9 +53,16 @@
     <pre id="decryptOutput"></pre>
   </div>
 
+  <!-- Signaturprüfung -->
+  <div class="box">
+    <h3>Signatur prüfen</h3>
+    <button onclick="verifyFirstContract()">Signatur vom ersten Vertrag prüfen</button>
+    <pre id="verifyOutput"></pre>
+  </div>
+
   <script type="module">
     import { createKeyPair, listKeys, formatPeerLabel } from "./core/keyManager.js";
-    import { createContract, listContracts, decryptContract } from "./core/contractManager.js";
+    import { createContract, listContracts, decryptContract, verifyContractSignature } from "./core/contractManager.js";
     import { calculateTrustScores } from "./core/trustGraph.js";
 
     // Dropdowns aktualisieren
@@ -123,6 +130,18 @@
       try {
         const plain = await decryptContract(ctrs[0], peer);
         document.getElementById("decryptOutput").innerText = JSON.stringify(plain, null, 2);
+      } catch (err) {
+        alert("Fehler: " + err.message);
+      }
+    };
+
+    // Signatur prüfen
+    window.verifyFirstContract = async () => {
+      const ctrs = await listContracts();
+      if (ctrs.length === 0) return alert("Keine Verträge gefunden");
+      try {
+        const ok = await verifyContractSignature(ctrs[0]);
+        document.getElementById("verifyOutput").innerText = ok ? "✅ Signatur gültig" : "❌ Signatur ungültig";
       } catch (err) {
         alert("Fehler: " + err.message);
       }
