@@ -1,8 +1,8 @@
 // dCent Core – Storage Utilities
-// Zentraler Zugriff auf IndexedDB (Keys + Contracts) + Backup/Restore
+// Zentraler Zugriff auf IndexedDB (Keys + Contracts + Collateral) + Backup/Restore
 
 const DB_NAME = "dcentDB";
-const DB_VERSION = 2; // Einheitlich für alle Module
+const DB_VERSION = 3; // Version hochgesetzt, damit neuer Store erstellt wird
 
 // Öffnet DB und legt Stores an, falls nicht vorhanden
 export function openDB() {
@@ -16,6 +16,9 @@ export function openDB() {
       }
       if (!db.objectStoreNames.contains("contracts")) {
         db.createObjectStore("contracts", { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains("collateral")) {
+        db.createObjectStore("collateral", { keyPath: "id" });
       }
     };
     request.onsuccess = (event) => resolve(event.target.result);
@@ -72,12 +75,14 @@ export async function deleteFromDB(storeName, id) {
 export async function exportBackup() {
   const keys = await getAllFromDB("keys");
   const contracts = await getAllFromDB("contracts");
+  const collateral = await getAllFromDB("collateral");
 
   return {
     version: DB_VERSION,
     timestamp: new Date().toISOString(),
     keys,
-    contracts
+    contracts,
+    collateral
   };
 }
 
@@ -100,21 +105,17 @@ export async function importBackup(data) {
   const db = await openDB();
 
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(["keys", "contracts"], "readwrite");
+    const tx = db.transaction(["keys", "contracts", "collateral"], "readwrite");
 
     try {
-      // Keys wiederherstellen
       if (Array.isArray(data.keys)) {
-        data.keys.forEach(key => {
-          tx.objectStore("keys").put(key);
-        });
+        data.keys.forEach(key => tx.objectStore("keys").put(key));
       }
-
-      // Verträge wiederherstellen
       if (Array.isArray(data.contracts)) {
-        data.contracts.forEach(contract => {
-          tx.objectStore("contracts").put(contract);
-        });
+        data.contracts.forEach(contract => tx.objectStore("contracts").put(contract));
+      }
+      if (Array.isArray(data.collateral)) {
+        data.collateral.forEach(c => tx.objectStore("collateral").put(c));
       }
 
       tx.oncomplete = () => resolve(true);
