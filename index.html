@@ -117,11 +117,14 @@
       const text = document.getElementById("contractText").value.trim();
       const amount = parseFloat(document.getElementById("amount").value) || 0;
 
-      // Collateral-Feld korrekt behandeln
+      // Collateral robust auslesen
       const collateralInput = document.getElementById("collateral").value;
-      const collateral = collateralInput !== "" ? parseFloat(collateralInput) : 0;
+      let collateral = 0;
+      if (collateralInput && !isNaN(parseFloat(collateralInput))) {
+        collateral = parseFloat(collateralInput);
+      }
 
-      console.log("DEBUG → collateralAmount an createContract übergeben:", collateral);
+      console.log("DEBUG → collateralInput:", collateralInput, "→ collateralAmount:", collateral);
 
       if (!from || !to || !text) return alert("Alle Felder ausfüllen!");
 
@@ -145,6 +148,8 @@
     // TrustScores berechnen
     window.showTrustScores = async () => {
       const contracts = await listContracts();
+      console.log("DEBUG → Verträge für TrustScore:", contracts);
+
       const scores = {};
       const details = {};
 
