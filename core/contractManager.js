@@ -5,7 +5,9 @@ import { saveToDB, getAllFromDB } from "./storage.js";
 
 const STORE_NAME = "contracts";
 
-// Hilfsfunktionen: AES
+//
+// -------- AES Hilfsfunktionen --------
+//
 async function generateAESKey() {
   return crypto.subtle.generateKey(
     { name: "AES-GCM", length: 256 },
@@ -22,7 +24,10 @@ async function encryptAES(key, data) {
     key,
     encoded
   );
-  return { ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext))), iv: Array.from(iv) };
+  return {
+    ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
+    iv: Array.from(iv)
+  };
 }
 
 async function decryptAES(key, encryptedData, iv) {
@@ -36,7 +41,9 @@ async function decryptAES(key, encryptedData, iv) {
   return new TextDecoder().decode(plaintext);
 }
 
-// Hilfsfunktionen: AES-Key-Sharing (vereinfacht)
+//
+// -------- AES Key-Sharing (vereinfacht) --------
+//
 async function encryptKeyForPeer(aesKey, peerId) {
   const peerKey = await getKey(peerId);
   if (!peerKey) throw new Error(`Kein Key für ${peerId}`);
@@ -55,7 +62,9 @@ async function decryptKeyForPeer(encryptedKeyB64, peerId) {
   );
 }
 
-// Hilfsfunktionen: Signatur
+//
+// -------- Signatur Hilfsfunktionen --------
+//
 async function signData(privateKeyJwk, data) {
   const privateKey = await crypto.subtle.importKey(
     "jwk",
@@ -95,7 +104,9 @@ async function verifySignature(publicKeyJwk, data, signatureB64) {
   );
 }
 
-// Vertrag erstellen
+//
+// -------- Vertragsfunktionen --------
+//
 export async function createContract(fromId, toId, content, amount = 0) {
   const fromKey = await getKey(fromId);
   if (!fromKey) throw new Error(`Kein Key für ${fromId}`);
@@ -107,7 +118,7 @@ export async function createContract(fromId, toId, content, amount = 0) {
   const aesKey = await generateAESKey();
   const encrypted = await encryptAES(aesKey, content);
 
-  // AES-Key für beide Parteien speichern
+  // AES-Key für beide Parteien mit ihren Peer-IDs speichern
   const encryptedKeys = {};
   encryptedKeys[fromId] = await encryptKeyForPeer(aesKey, fromId);
   encryptedKeys[toId] = await encryptKeyForPeer(aesKey, toId);
