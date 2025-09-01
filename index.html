@@ -132,10 +132,39 @@
       document.getElementById("contractsOutput").innerText = JSON.stringify(ctrs, null, 2);
     };
 
-    // TrustScores berechnen
+    // TrustScores berechnen (mit Collateral-Erklärung)
     window.showTrustScores = async () => {
-      const scores = await calculateTrustScores();
-      document.getElementById("trustOutput").innerText = JSON.stringify(scores, null, 2);
+      const contracts = await listContracts();
+      const scores = {};
+      const details = {};
+
+      contracts.forEach(contract => {
+        const basePoints = 10;
+        let bonus = 0;
+        if (contract.collateral && contract.collateral.status === "locked") {
+          const fromCollateral = contract.collateral.from || 0;
+          const toCollateral = contract.collateral.to || 0;
+          const totalCollateral = fromCollateral + toCollateral;
+          bonus = Math.min(20, totalCollateral * 2);
+        }
+
+        [contract.from, contract.to].forEach(peer => {
+          if (!scores[peer]) scores[peer] = 0;
+          if (!details[peer]) details[peer] = { base: 0, bonus: 0 };
+
+          scores[peer] += basePoints + bonus;
+          details[peer].base += basePoints;
+          details[peer].bonus += bonus;
+        });
+      });
+
+      // Ausgabe formatieren
+      let output = "";
+      for (const peer in scores) {
+        output += `${peer} → Gesamt: ${scores[peer]} (Basis: ${details[peer].base}, Collateral-Bonus: ${details[peer].bonus})\n`;
+      }
+
+      document.getElementById("trustOutput").innerText = output || "Keine Verträge gefunden.";
     };
 
     // Vertrag entschlüsseln
