@@ -146,7 +146,7 @@ export async function createContract(fromId, toId, content, amount = 0, collater
     encryptedContent: encrypted.ciphertext,
     iv: encrypted.iv,
     encryptedKeys,
-    collateral   // <-- jetzt sicher drin
+    collateral // <- jetzt IMMER im Vertrag, auch null
   };
 
   // Signatur erstellen
