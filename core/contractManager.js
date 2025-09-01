@@ -1,178 +1,128 @@
-// dCent Core – Contract Management (mit Verschlüsselung + Signatur)
+// dCent Core – Collateral Manager
+// Verwaltung von PfandToken (DZP) pro Peer
 
-import { getKey } from "./keyManager.js";
-import { saveToDB, getAllFromDB } from "./storage.js";
+import { openDB } from "./storage.js";
 
-const STORE_NAME = "contracts";
+const STORE_NAME = "collateral";
 
-//
-// -------- AES Hilfsfunktionen --------
-//
-async function generateAESKey() {
-  return crypto.subtle.generateKey(
-    { name: "AES-GCM", length: 256 },
-    true,
-    ["encrypt", "decrypt"]
-  );
+// DB vorbereiten
+async function initStore() {
+  const db = await openDB();
+  if (!db.objectStoreNames.contains(STORE_NAME)) {
+    // WARNUNG: objectStoreNames ist read-only bei laufendem DB
+    // Lösung: DB Version hochziehen, falls nötig
+    console.warn("Bitte DB-Version erhöhen, falls collateral-Store fehlt.");
+  }
 }
 
-async function encryptAES(key, data) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encoded = new TextEncoder().encode(data);
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    key,
-    encoded
-  );
-  return {
-    ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
-    iv: Array.from(iv)
-  };
+// Guthaben eines Peers abfragen
+export async function getCollateral(peerId) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const store = tx.objectStore(STORE_NAME);
+    const request = store.get(peerId);
+    request.onsuccess = () => resolve(request.result ? request.result.amount : 0);
+    request.onerror = (err) => reject(err);
+  });
 }
 
-async function decryptAES(key, encryptedData, iv) {
-  const bytes = Uint8Array.from(atob(encryptedData), c => c.charCodeAt(0));
-  const ivArray = new Uint8Array(iv);
-  const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: ivArray },
-    key,
-    bytes
-  );
-  return new TextDecoder().decode(plaintext);
+// Guthaben hinzufügen (z. B. Kauf neuer PfandToken)
+export async function addCollateral(peerId, amount) {
+  const db = await openDB();
+  const current = await getCollateral(peerId);
+
+  const tx = db.transaction(STORE_NAME, "readwrite");
+  tx.objectStore(STORE_NAME).put({ id: peerId, amount: current + amount });
+
+  return current + amount;
 }
 
-//
-// -------- AES Key-Sharing (vereinfacht) --------
-//
-async function encryptKeyForPeer(aesKey, peerId) {
-  const peerKey = await getKey(peerId);
-  if (!peerKey) throw new Error(`Kein Key für ${peerId}`);
-  const rawKey = await crypto.subtle.exportKey("jwk", aesKey);
-  return btoa(JSON.stringify(rawKey));
+// Guthaben abziehen (z. B. Verkauf oder Verlust durch Betrug)
+export async function subtractCollateral(peerId, amount) {
+  const db = await openDB();
+  const current = await getCollateral(peerId);
+  const newAmount = Math.max(0, current - amount);
+
+  const tx = db.transaction(STORE_NAME, "readwrite");
+  tx.objectStore(STORE_NAME).put({ id: peerId, amount: newAmount });
+
+  return newAmount;
 }
 
-async function decryptKeyForPeer(encryptedKeyB64, peerId) {
-  const rawKey = JSON.parse(atob(encryptedKeyB64));
-  return await crypto.subtle.importKey(
-    "jwk",
-    rawKey,
-    { name: "AES-GCM" },
-    true,
-    ["encrypt", "decrypt"]
-  );
-}
+// Collateral für einen Vertrag locken
+export async function lockCollateral(contractId, peerId, amount) {
+  const db = await openDB();
+  const current = await getCollateral(peerId);
 
-//
-// -------- Signatur Hilfsfunktionen --------
-//
-async function signData(privateKeyJwk, data) {
-  const privateKey = await crypto.subtle.importKey(
-    "jwk",
-    privateKeyJwk,
-    { name: "ECDSA", namedCurve: "P-256" },
-    false,
-    ["sign"]
-  );
-
-  const encoded = new TextEncoder().encode(JSON.stringify(data));
-  const signature = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    privateKey,
-    encoded
-  );
-
-  return btoa(String.fromCharCode(...new Uint8Array(signature)));
-}
-
-async function verifySignature(publicKeyJwk, data, signatureB64) {
-  const publicKey = await crypto.subtle.importKey(
-    "jwk",
-    publicKeyJwk,
-    { name: "ECDSA", namedCurve: "P-256" },
-    true,
-    ["verify"]
-  );
-
-  const encoded = new TextEncoder().encode(JSON.stringify(data));
-  const sigBytes = Uint8Array.from(atob(signatureB64), c => c.charCodeAt(0));
-
-  return await crypto.subtle.verify(
-    { name: "ECDSA", hash: "SHA-256" },
-    publicKey,
-    sigBytes,
-    encoded
-  );
-}
-
-//
-// -------- Vertragsfunktionen --------
-//
-export async function createContract(fromId, toId, content, amount = 0) {
-  const fromKey = await getKey(fromId);
-  if (!fromKey) throw new Error(`Kein Key für ${fromId}`);
-
-  const contractId = `ctr_${Date.now()}`;
-  const created = new Date().toISOString();
-
-  // Ephemeral AES-Key
-  const aesKey = await generateAESKey();
-  const encrypted = await encryptAES(aesKey, content);
-
-  // AES-Key für beide Parteien mit ihren Peer-IDs speichern
-  const encryptedKeys = {};
-  encryptedKeys[fromId] = await encryptKeyForPeer(aesKey, fromId);
-  encryptedKeys[toId] = await encryptKeyForPeer(aesKey, toId);
-
-  // Basisdaten ohne Signatur
-  const baseData = {
-    id: contractId,
-    from: fromId,
-    to: toId,
-    amount,
-    created,
-    encryptedContent: encrypted.ciphertext,
-    iv: encrypted.iv,
-    encryptedKeys
-  };
-
-  // Signatur erstellen
-  const signature = await signData(fromKey.privateKey, baseData);
-
-  const contract = {
-    ...baseData,
-    signature,
-    signer: fromId
-  };
-
-  await saveToDB(STORE_NAME, contract);
-  return contract;
-}
-
-// Alle Verträge abrufen
-export async function listContracts() {
-  return await getAllFromDB(STORE_NAME);
-}
-
-// Vertrag entschlüsseln für einen Peer
-export async function decryptContract(contract, peerId) {
-  if (!contract.encryptedKeys[peerId]) {
-    throw new Error("Peer ist nicht Teil dieses Vertrags");
+  if (current < amount) {
+    throw new Error(`Nicht genug Collateral: ${peerId} hat nur ${current}, benötigt ${amount}`);
   }
 
-  const aesKey = await decryptKeyForPeer(contract.encryptedKeys[peerId], peerId);
-  const plaintext = await decryptAES(aesKey, contract.encryptedContent, contract.iv);
+  // Guthaben reduzieren
+  const newAmount = current - amount;
+  const tx = db.transaction(STORE_NAME, "readwrite");
+  tx.objectStore(STORE_NAME).put({ id: peerId, amount: newAmount });
 
-  return {
-    ...contract,
-    content: plaintext
-  };
+  // Lock-Eintrag im collateral-Store anlegen
+  const lockStore = tx.objectStore(STORE_NAME);
+  const lockId = `${contractId}_${peerId}`;
+  lockStore.put({ id: lockId, amount, locked: true });
+
+  return true;
 }
 
-// Vertragssignatur prüfen
-export async function verifyContractSignature(contract) {
-  const { signature, signer, ...baseData } = contract;
-  const signerKey = await getKey(signer);
-  if (!signerKey) throw new Error(`Kein Key für ${signer}`);
+// Collateral freigeben nach erfolgreichem Vertrag
+export async function releaseCollateral(contractId, peerId) {
+  const db = await openDB();
+  const lockId = `${contractId}_${peerId}`;
 
-  return await verifySignature(signerKey.publicKey, baseData, signature);
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.get(lockId);
+
+    req.onsuccess = () => {
+      const lock = req.result;
+      if (lock && lock.locked) {
+        // zurückbuchen
+        const update = store.get(peerId);
+        update.onsuccess = () => {
+          const current = update.result ? update.result.amount : 0;
+          store.put({ id: peerId, amount: current + lock.amount });
+          store.delete(lockId);
+          resolve(true);
+        };
+      } else {
+        reject(new Error("Kein Lock gefunden"));
+      }
+    };
+
+    req.onerror = (err) => reject(err);
+  });
+}
+
+// Collateral einziehen bei Vertragsbruch
+export async function forfeitCollateral(contractId, peerId) {
+  const db = await openDB();
+  const lockId = `${contractId}_${peerId}`;
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.get(lockId);
+
+    req.onsuccess = () => {
+      const lock = req.result;
+      if (lock && lock.locked) {
+        // Lock einfach löschen (Collateral weg)
+        store.delete(lockId);
+        resolve(true);
+      } else {
+        reject(new Error("Kein Lock gefunden"));
+      }
+    };
+
+    req.onerror = (err) => reject(err);
+  });
 }
