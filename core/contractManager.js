@@ -127,13 +127,17 @@ export async function createContract(fromId, toId, content, amount = 0, collater
   // Collateral locken (falls > 0)
   let collateral = null;
   if (collateralAmount > 0) {
-    await lockCollateral(contractId, fromId, collateralAmount);
-    await lockCollateral(contractId, toId, collateralAmount);
-    collateral = {
-      from: collateralAmount,
-      to: collateralAmount,
-      status: "locked"
-    };
+    try {
+      await lockCollateral(contractId, fromId, collateralAmount);
+      await lockCollateral(contractId, toId, collateralAmount);
+      collateral = {
+        from: collateralAmount,
+        to: collateralAmount,
+        status: "locked"
+      };
+    } catch (err) {
+      console.warn("Collateral konnte nicht gelockt werden:", err);
+    }
   }
 
   // Basisdaten inkl. Collateral
@@ -146,7 +150,7 @@ export async function createContract(fromId, toId, content, amount = 0, collater
     encryptedContent: encrypted.ciphertext,
     iv: encrypted.iv,
     encryptedKeys,
-    collateral // <- jetzt IMMER im Vertrag, auch null
+    collateral // <-- jetzt garantiert dabei
   };
 
   // Signatur erstellen
