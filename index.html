@@ -76,8 +76,8 @@
 
       peers.forEach(peer => {
         const option = document.createElement("option");
-        option.value = peer.id; // volle Peer-ID
-        option.text = formatPeerLabel(peer); // Name [ShortID]
+        option.value = peer.id;                // volle Peer-ID als Value
+        option.text = formatPeerLabel(peer);   // Name [ShortID] als Anzeige
         fromSelect.appendChild(option.cloneNode(true));
         toSelect.appendChild(option.cloneNode(true));
         decryptSelect.appendChild(option.cloneNode(true));
@@ -110,13 +110,13 @@
       alert("Vertrag erstellt: " + ctr.id);
     };
 
-    // Verträge anzeigen (verschlüsselt)
+    // Verträge anzeigen
     window.showContracts = async () => {
       const ctrs = await listContracts();
       document.getElementById("contractsOutput").innerText = JSON.stringify(ctrs, null, 2);
     };
 
-    // TrustScores anzeigen
+    // TrustScores berechnen
     window.showTrustScores = async () => {
       const scores = await calculateTrustScores();
       document.getElementById("trustOutput").innerText = JSON.stringify(scores, null, 2);
@@ -124,11 +124,12 @@
 
     // Vertrag entschlüsseln
     window.decryptFirst = async () => {
-      const peer = document.getElementById("decryptPeer").value;
+      const peerId = document.getElementById("decryptPeer").value;
+      if (!peerId) return alert("Kein Peer ausgewählt!");
       const ctrs = await listContracts();
       if (ctrs.length === 0) return alert("Keine Verträge gefunden");
       try {
-        const plain = await decryptContract(ctrs[0], peer);
+        const plain = await decryptContract(ctrs[0], peerId);
         document.getElementById("decryptOutput").innerText = JSON.stringify(plain, null, 2);
       } catch (err) {
         alert("Fehler: " + err.message);
@@ -147,7 +148,7 @@
       }
     };
 
-    // Bei Start Dropdowns laden
+    // Dropdowns initial laden
     refreshPeerDropdowns();
   </script>
 </body>
