@@ -7,6 +7,7 @@ import { listContracts } from "./contractManager.js";
 export async function calculateTrustScores() {
   const contracts = await listContracts();
   const scores = {};
+  const details = {};
 
   contracts.forEach(contract => {
     const from = contract.from;
@@ -17,27 +18,28 @@ export async function calculateTrustScores() {
 
     // Bonus für Verträge mit Collateral
     let bonus = 0;
-    if (contract.collateral && contract.collateral.status === "locked") {
+    if (contract.collateral) {
       const fromCollateral = contract.collateral.from || 0;
       const toCollateral = contract.collateral.to || 0;
       const totalCollateral = fromCollateral + toCollateral;
       bonus = Math.min(20, totalCollateral * 2); // z. B. 2 Punkte pro DZP, max 20
     }
 
-    // Punkte für "from"
-    if (!scores[from]) scores[from] = 0;
-    scores[from] += basePoints + bonus;
+    [from, to].forEach(peer => {
+      if (!scores[peer]) scores[peer] = 0;
+      if (!details[peer]) details[peer] = { base: 0, bonus: 0 };
 
-    // Punkte für "to"
-    if (!scores[to]) scores[to] = 0;
-    scores[to] += basePoints + bonus;
+      scores[peer] += basePoints + bonus;
+      details[peer].base += basePoints;
+      details[peer].bonus += bonus;
+    });
   });
 
-  return scores;
+  return { scores, details };
 }
 
 // TrustScore für einen Peer abrufen
 export async function getTrustScore(peerId) {
-  const scores = await calculateTrustScores();
+  const { scores } = await calculateTrustScores();
   return scores[peerId] || 0;
 }
