@@ -32,6 +32,7 @@
     <select id="toPeer"></select><br/>
     <input id="contractText" placeholder="Vertragsinhalt" />
     <input id="amount" placeholder="Betrag" type="number" />
+    <input id="collateral" placeholder="Pfand (DZP)" type="number" />
     <button onclick="createContractUI()">Vertrag anlegen</button>
     <button onclick="showContracts()">Alle Verträge anzeigen</button>
     <pre id="contractsOutput"></pre>
@@ -60,10 +61,20 @@
     <pre id="verifyOutput"></pre>
   </div>
 
+  <!-- Backup / Restore -->
+  <div class="box">
+    <h3>Backup / Restore</h3>
+    <button onclick="downloadBackup()">Backup herunterladen</button><br/>
+    <input type="file" id="backupFile" />
+    <button onclick="restoreBackup()">Backup wiederherstellen</button>
+    <pre id="backupOutput"></pre>
+  </div>
+
   <script type="module">
     import { createKeyPair, listKeys, formatPeerLabel } from "./core/keyManager.js";
     import { createContract, listContracts, decryptContract, verifyContractSignature } from "./core/contractManager.js";
     import { calculateTrustScores } from "./core/trustGraph.js";
+    import { downloadBackup, uploadBackup } from "./core/storage.js";
 
     // Dropdowns aktualisieren
     async function refreshPeerDropdowns() {
@@ -105,9 +116,14 @@
       const to = document.getElementById("toPeer").value;
       const text = document.getElementById("contractText").value.trim();
       const amount = parseFloat(document.getElementById("amount").value);
+      const collateral = parseFloat(document.getElementById("collateral").value) || 0;
       if (!from || !to || !text) return alert("Alle Felder ausfüllen!");
-      const ctr = await createContract(from, to, text, amount);
-      alert("Vertrag erstellt: " + ctr.id);
+      try {
+        const ctr = await createContract(from, to, text, amount, collateral);
+        alert("Vertrag erstellt: " + ctr.id);
+      } catch (err) {
+        alert("Fehler beim Vertrag: " + err.message);
+      }
     };
 
     // Verträge anzeigen
@@ -145,6 +161,25 @@
         document.getElementById("verifyOutput").innerText = ok ? "✅ Signatur gültig" : "❌ Signatur ungültig";
       } catch (err) {
         alert("Fehler: " + err.message);
+      }
+    };
+
+    // Backup herunterladen
+    window.downloadBackup = async () => {
+      await downloadBackup();
+      document.getElementById("backupOutput").innerText = "Backup heruntergeladen!";
+    };
+
+    // Backup wiederherstellen
+    window.restoreBackup = async () => {
+      const fileInput = document.getElementById("backupFile");
+      if (!fileInput.files.length) return alert("Bitte Backup-Datei auswählen!");
+      try {
+        await uploadBackup(fileInput.files[0]);
+        document.getElementById("backupOutput").innerText = "Backup wiederhergestellt!";
+        await refreshPeerDropdowns();
+      } catch (err) {
+        alert("Fehler beim Restore: " + err.message);
       }
     };
 
