@@ -1,11 +1,11 @@
-// dCent Core – Contract Management (mit Vertragsverschlüsselung)
+// dCent Core – Contract Management (mit Verschlüsselung + Signatur)
 
-import { getFromDB, saveToDB, getAllFromDB } from "./storage.js";
 import { getKey } from "./keyManager.js";
+import { saveToDB, getAllFromDB } from "./storage.js";
 
 const STORE_NAME = "contracts";
 
-// Hilfsfunktionen
+// Hilfsfunktionen: AES
 async function generateAESKey() {
   return crypto.subtle.generateKey(
     { name: "AES-GCM", length: 256 },
@@ -36,20 +36,15 @@ async function decryptAES(key, encryptedData, iv) {
   return new TextDecoder().decode(plaintext);
 }
 
-async function encryptKeyForPeer(aesKey, peer) {
-  const peerKey = await getKey(peer);
-  if (!peerKey) throw new Error(`Kein Key für ${peer}`);
-
-  // hier vereinfachte Variante: AES-Key als JWK exportieren + Base64 speichern
+// Hilfsfunktionen: AES-Key-Sharing (vereinfacht)
+async function encryptKeyForPeer(aesKey, peerId) {
+  const peerKey = await getKey(peerId);
+  if (!peerKey) throw new Error(`Kein Key für ${peerId}`);
   const rawKey = await crypto.subtle.exportKey("jwk", aesKey);
   return btoa(JSON.stringify(rawKey));
 }
 
-async function decryptKeyForPeer(encryptedKeyB64, peer) {
-  const peerKey = await getKey(peer);
-  if (!peerKey) throw new Error(`Kein Key für ${peer}`);
-
-  // vereinfachtes Importieren
+async function decryptKeyForPeer(encryptedKeyB64, peerId) {
   const rawKey = JSON.parse(atob(encryptedKeyB64));
   return await crypto.subtle.importKey(
     "jwk",
@@ -60,10 +55,50 @@ async function decryptKeyForPeer(encryptedKeyB64, peer) {
   );
 }
 
-// Vertrag erzeugen & verschlüsseln
+// Hilfsfunktionen: Signatur
+async function signData(privateKeyJwk, data) {
+  const privateKey = await crypto.subtle.importKey(
+    "jwk",
+    privateKeyJwk,
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign"]
+  );
+
+  const encoded = new TextEncoder().encode(JSON.stringify(data));
+  const signature = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    privateKey,
+    encoded
+  );
+
+  return btoa(String.fromCharCode(...new Uint8Array(signature)));
+}
+
+async function verifySignature(publicKeyJwk, data, signatureB64) {
+  const publicKey = await crypto.subtle.importKey(
+    "jwk",
+    publicKeyJwk,
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["verify"]
+  );
+
+  const encoded = new TextEncoder().encode(JSON.stringify(data));
+  const sigBytes = Uint8Array.from(atob(signatureB64), c => c.charCodeAt(0));
+
+  return await crypto.subtle.verify(
+    { name: "ECDSA", hash: "SHA-256" },
+    publicKey,
+    sigBytes,
+    encoded
+  );
+}
+
+// Vertrag erstellen
 export async function createContract(fromId, toId, content, amount = 0) {
   const fromKey = await getKey(fromId);
-  if (!fromKey) throw new Error(`Kein Key für ${fromId} gefunden`);
+  if (!fromKey) throw new Error(`Kein Key für ${fromId}`);
 
   const contractId = `ctr_${Date.now()}`;
   const created = new Date().toISOString();
@@ -72,13 +107,13 @@ export async function createContract(fromId, toId, content, amount = 0) {
   const aesKey = await generateAESKey();
   const encrypted = await encryptAES(aesKey, content);
 
-  // AES-Key für beide Parteien verschlüsseln
-  const encryptedKeys = {
-    from: await encryptKeyForPeer(aesKey, fromId),
-    to: await encryptKeyForPeer(aesKey, toId),
-  };
+  // AES-Key für beide Parteien speichern
+  const encryptedKeys = {};
+  encryptedKeys[fromId] = await encryptKeyForPeer(aesKey, fromId);
+  encryptedKeys[toId] = await encryptKeyForPeer(aesKey, toId);
 
-  const contract = {
+  // Basisdaten ohne Signatur
+  const baseData = {
     id: contractId,
     from: fromId,
     to: toId,
@@ -86,32 +121,47 @@ export async function createContract(fromId, toId, content, amount = 0) {
     created,
     encryptedContent: encrypted.ciphertext,
     iv: encrypted.iv,
-    encryptedKeys,
-    signature: "todo_sign", // hier später echte Signatur
+    encryptedKeys
+  };
+
+  // Signatur erstellen
+  const signature = await signData(fromKey.privateKey, baseData);
+
+  const contract = {
+    ...baseData,
+    signature,
+    signer: fromId
   };
 
   await saveToDB(STORE_NAME, contract);
   return contract;
 }
 
-// Alle Verträge abrufen (verschlüsselt)
+// Alle Verträge abrufen
 export async function listContracts() {
   return await getAllFromDB(STORE_NAME);
 }
 
 // Vertrag entschlüsseln für einen Peer
 export async function decryptContract(contract, peerId) {
-  // prüfen, ob Peer beteiligt ist
-  if (contract.from !== peerId && contract.to !== peerId) {
+  if (!contract.encryptedKeys[peerId]) {
     throw new Error("Peer ist nicht Teil dieses Vertrags");
   }
 
-  const encryptedKey = contract.encryptedKeys[peerId];
-  const aesKey = await decryptKeyForPeer(encryptedKey, peerId);
-
+  const aesKey = await decryptKeyForPeer(contract.encryptedKeys[peerId], peerId);
   const plaintext = await decryptAES(aesKey, contract.encryptedContent, contract.iv);
+
   return {
     ...contract,
-    content: plaintext,
+    content: plaintext
   };
+}
+
+// Vertragssignatur prüfen
+export async function verifyContractSignature(contract) {
+  const { signature, signer, ...baseData } = contract;
+  const signerKey = await getKey(signer);
+  if (!signerKey) throw new Error(`Kein Key für ${signer}`);
+
+  return await verifySignature(signerKey.publicKey, baseData, signature);
 }
