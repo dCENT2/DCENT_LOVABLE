@@ -1,30 +1,12 @@
-import { saveToDB, getFromDB, getAllFromDB } from "./storage.js";
-
 // dCent Core – Key Management
+// Verwaltung von Identitäten (Keys) mit eindeutiger Peer-ID
 
-const DB_NAME = "dcentDB";
-const DB_VERSION = 2;  // Einheitlich mit contractManager
+import { saveToDB, getFromDB, getAllFromDB } from "./storage.js";
+import { sha256 } from "./utils.js";
+
 const STORE_NAME = "keys";
 
-// IndexedDB öffnen
-function openDB() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = (event) => {
-      const db = event.target.result;
-      if (!db.objectStoreNames.contains("keys")) {
-        db.createObjectStore("keys", { keyPath: "id" });
-      }
-      if (!db.objectStoreNames.contains("contracts")) {
-        db.createObjectStore("contracts", { keyPath: "id" });
-      }
-    };
-    request.onsuccess = (event) => resolve(event.target.result);
-    request.onerror = (event) => reject(event.target.error);
-  });
-}
-
-// Neues Keypair erzeugen
+// Neue Identität (KeyPair) erzeugen
 export async function createKeyPair(identityName = "default") {
   const keyPair = await crypto.subtle.generateKey(
     { name: "ECDSA", namedCurve: "P-256" },
@@ -35,37 +17,34 @@ export async function createKeyPair(identityName = "default") {
   const publicKeyJwk = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
   const privateKeyJwk = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
 
-  const db = await openDB();
-  const tx = db.transaction(STORE_NAME, "readwrite");
-  tx.objectStore(STORE_NAME).put({
-    id: identityName,
+  // Peer-ID = SHA256 vom PublicKey
+  const raw = JSON.stringify(publicKeyJwk);
+  const peerId = await sha256(raw);
+
+  const keyObject = {
+    id: peerId,                   // eindeutige Peer-ID
+    shortId: peerId.slice(0, 10), // Kürzel für UI
+    name: identityName,           // frei wählbarer Alias
     publicKey: publicKeyJwk,
     privateKey: privateKeyJwk,
     created: new Date().toISOString(),
-  });
+  };
 
-  return publicKeyJwk;
+  await saveToDB(STORE_NAME, keyObject);
+  return keyObject;
 }
 
-// Alle Keys abrufen
+// Alle gespeicherten Keys abrufen
 export async function listKeys() {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readonly");
-    const request = tx.objectStore(STORE_NAME).getAll();
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
+  return await getAllFromDB(STORE_NAME);
 }
 
-// Einzelnen Key abrufen (hier fehlte export!)
-export async function getKey(identityName = "default") {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readonly");
-    const store = tx.objectStore(STORE_NAME);
-    const request = store.get(identityName);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
+// Einzelnen Key abrufen
+export async function getKey(peerId) {
+  return await getFromDB(STORE_NAME, peerId);
+}
+
+// Hilfsfunktion: Peer-Label für UI (Name + Short-ID)
+export function formatPeerLabel(peer) {
+  return `${peer.name} [${peer.shortId}]`;
 }
