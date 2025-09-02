@@ -72,9 +72,17 @@
     <label>Teilnehmer (IDs, Komma-getrennt):</label><br/>
     <textarea id="multiParticipants" rows="2" cols="60"></textarea><br/>
     <label>Threshold:</label>
-    <input id="multiThreshold" type="number" value="2" />
+    <input id="multiThreshold" type="number" value="2" /><br/>
+
+    <label>From-Peers (Leistende, Komma-getrennt):</label><br/>
+    <input id="multiFromPeers" placeholder="alice,bob" style="width:60%" /><br/>
+
+    <label>To-Peers (Empfänger, Komma-getrennt):</label><br/>
+    <input id="multiToPeers" placeholder="carol" style="width:60%" /><br/>
+
     <input id="multiText" placeholder="Vertragsinhalt" />
     <input id="multiAmount" placeholder="Betrag" type="number" />
+    <input id="multiCollateral" placeholder="Pfand (DZP pro FromPeer)" type="number" />
     <button onclick="createMultisigUI()">Multisig-Vertrag anlegen</button>
     <button onclick="showMultisig()">Alle Multisig-Verträge anzeigen</button>
     <pre id="multisigOutput"></pre>
@@ -209,12 +217,20 @@
     window.createMultisigUI = async () => {
       const participantsInput = document.getElementById("multiParticipants").value.trim();
       const participants = participantsInput.split(",").map(s => s.trim()).filter(s => s.length > 0);
+
+      const fromPeersInput = document.getElementById("multiFromPeers").value.trim();
+      const fromPeers = fromPeersInput.split(",").map(s => s.trim()).filter(s => s.length > 0);
+
+      const toPeersInput = document.getElementById("multiToPeers").value.trim();
+      const toPeers = toPeersInput.split(",").map(s => s.trim()).filter(s => s.length > 0);
+
       const threshold = parseInt(document.getElementById("multiThreshold").value) || 1;
       const text = document.getElementById("multiText").value.trim();
       const amount = parseFloat(document.getElementById("multiAmount").value) || 0;
+      const collateral = parseFloat(document.getElementById("multiCollateral").value) || 0;
 
       try {
-        const ctr = await createMultisigContract(participants, threshold, text, amount);
+        const ctr = await createMultisigContract(participants, threshold, text, amount, fromPeers, toPeers, collateral);
         alert("Multisig-Vertrag erstellt: " + ctr.id);
       } catch (err) {
         alert("Fehler: " + err.message);
@@ -227,6 +243,8 @@
       ctrs.forEach(c => {
         output += `ID: ${c.id}\n`;
         output += `  Teilnehmer: ${c.participants.join(", ")}\n`;
+        output += `  From-Peers: ${c.fromPeers ? c.fromPeers.join(", ") : "-"}\n`;
+        output += `  To-Peers: ${c.toPeers ? c.toPeers.join(", ") : "-"}\n`;
         output += `  Threshold: ${c.threshold}/${c.participants.length}\n`;
         output += `  Status: ${c.status}\n`;
         output += `  Signaturen: ${c.signatures ? c.signatures.length : 0}\n`;
