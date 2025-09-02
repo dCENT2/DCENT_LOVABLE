@@ -223,7 +223,22 @@
 
     window.showMultisig = async () => {
       const ctrs = await listMultisigContracts();
-      document.getElementById("multisigOutput").innerText = JSON.stringify(ctrs, null, 2);
+      let output = "";
+      ctrs.forEach(c => {
+        output += `ID: ${c.id}\n`;
+        output += `  Teilnehmer: ${c.participants.join(", ")}\n`;
+        output += `  Threshold: ${c.threshold}/${c.participants.length}\n`;
+        output += `  Status: ${c.status}\n`;
+        output += `  Signaturen: ${c.signatures ? c.signatures.length : 0}\n`;
+        if (c.approvals) {
+          output += `  Votes: ${JSON.stringify(c.approvals)}\n`;
+        }
+        if (c.collateral) {
+          output += `  Collateral: ${JSON.stringify(c.collateral)}\n`;
+        }
+        output += "\n";
+      });
+      document.getElementById("multisigOutput").innerText = output || "Keine Multisig-Verträge gefunden.";
     };
 
     window.signMultisigUI = async () => {
@@ -249,7 +264,11 @@
         output += `  Erfüllt: ${d.fulfilled}, Gebrochen: ${d.broken}\n`;
         output += `  Diversität: ${d.d}\n`;
         output += `  Collateral gesamt: ${d.totalCollateral}\n`;
-        output += `  Basiswert: ${d.base}\n\n`;
+        output += `  Basiswert: ${d.base}\n`;
+        if (d.multisigBonus !== undefined) {
+          output += `  Multisig-Threshold-Bonus: ${d.multisigBonus}\n`;
+        }
+        output += "\n";
       }
       document.getElementById("trustOutput").innerText =
         output || "Keine Verträge gefunden.";
