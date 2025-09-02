@@ -1,5 +1,6 @@
 // dCent Core – TrustGraph (Whitepaper-konform mit Status-Logik + Multisig)
-// Proof-of-Trust mit asymptotischem Wachstum, Diversität, Collateral, Strafe bei gebrochenen Verträgen & Threshold-Bonus
+// Proof-of-Trust mit asymptotischem Wachstum, Diversität, Collateral-Multiplikator,
+// Strafe bei gebrochenen Verträgen & Threshold-Bonus
 
 import { listContracts } from "./contractManager.js";
 import { listMultisigContracts } from "./multisigManager.js";
@@ -7,16 +8,14 @@ import { listMultisigContracts } from "./multisigManager.js";
 // Parameter (feinjustierbar)
 const MAX_TRUST = 100;   // asymptotisches Maximum
 const K = 0.15;          // Basis-Wachstumsrate
-const ALPHA = 0.05;      // Collateral-Faktor (logarithmische Dehnung)
+const ALPHA = 0.05;      // Collateral-Faktor (Multiplikator, logarithmisch)
 const BETA = 0.2;        // Diversitäts-Faktor
 const GAMMA = 0.2;       // Strafe pro gebrochenem Vertrag (20 % vom Score)
 const DELTA = 0.3;       // Multisig Threshold-Bonus (max +30 %)
 
-// Asymptotische Funktion mit Collateral-Dehnung
-function baseTrust(n, totalCollateral) {
-  const fCollateral = ALPHA * Math.log(1 + totalCollateral); // Collateral dehnt die Kurve
-  const effectiveK = K + fCollateral;
-  return MAX_TRUST * (1 - Math.exp(-effectiveK * n));
+// Basisfunktion nur über Anzahl erfüllter Verträge
+function baseTrust(n) {
+  return MAX_TRUST * (1 - Math.exp(-K * n));
 }
 
 export async function calculateTrustScores() {
@@ -50,7 +49,6 @@ export async function calculateTrustScores() {
   for (const peer in peerContracts) {
     const cs = peerContracts[peer];
 
-    // Zählen nach Status
     const fulfilled = cs.filter(c => c.status === "active").length;
     const broken = cs.filter(c => c.status === "broken").length;
 
@@ -59,7 +57,6 @@ export async function calculateTrustScores() {
     cs.forEach(c => {
       if (c.status === "active") {
         if (c.participants) {
-          // Multisig: alle anderen Teilnehmer zählen als Partner
           c.participants.forEach(p => { if (p !== peer) partners.add(p); });
         } else {
           partners.add(c.from === peer ? c.to : c.from);
@@ -68,13 +65,18 @@ export async function calculateTrustScores() {
     });
     const d = partners.size;
 
-    // Collateral
+    // Collateral (nur aktive Verträge)
     let totalCollateral = 0;
+    let multisigBonus = 0;
+
     cs.forEach(c => {
       if (c.status === "active" && c.collateral) {
         if (c.participants) {
-          // Multisig: Collateral gilt gleichmäßig für alle Teilnehmer
-          totalCollateral += c.collateral.amount || 0;
+          // Multisig: nur Empfänger profitieren
+          if (c.toPeers && c.toPeers.includes(peer)) {
+            const fromSum = Object.values(c.collateral.from || {}).reduce((a, b) => a + b, 0);
+            totalCollateral += fromSum;
+          }
         } else {
           if (c.from === peer) totalCollateral += c.collateral.from || 0;
           if (c.to === peer) totalCollateral += c.collateral.to || 0;
@@ -83,19 +85,22 @@ export async function calculateTrustScores() {
     });
 
     // Basiswert
-    const base = baseTrust(fulfilled, totalCollateral);
+    const base = baseTrust(fulfilled);
+
+    // Collateral-Multiplikator (separat angewandt)
+    const collateralFactor = 1 + ALPHA * Math.log(1 + totalCollateral);
 
     // Diversitätsbonus
-    let score = base * (1 + BETA * (d / Math.max(1, fulfilled || 1)));
+    let score = base * collateralFactor * (1 + BETA * (d / Math.max(1, fulfilled || 1)));
 
     // Multisig Threshold-Bonus
-    let multisigBonus = 0;
     cs.forEach(c => {
       if (c.status === "active" && c.participants) {
         const thresholdRatio = c.threshold / c.participants.length;
         const bonusFactor = (1 + DELTA * thresholdRatio);
-        multisigBonus += Math.round(score * (bonusFactor - 1)); // zusätzliche Punkte durch Threshold
+        const before = score;
         score *= bonusFactor;
+        multisigBonus += Math.round(score - before);
       }
     });
 
@@ -105,7 +110,7 @@ export async function calculateTrustScores() {
       score -= penalty;
     }
 
-    // Score begrenzen
+    // Begrenzen
     if (score < 0) score = 0;
     if (score > MAX_TRUST) score = MAX_TRUST;
 
@@ -116,6 +121,7 @@ export async function calculateTrustScores() {
       d,
       totalCollateral,
       base: Math.round(base),
+      collateralFactor: collateralFactor.toFixed(2),
       multisigBonus
     };
   }
@@ -123,7 +129,6 @@ export async function calculateTrustScores() {
   return { scores, details };
 }
 
-// Einzelner TrustScore
 export async function getTrustScore(peerId) {
   const { scores } = await calculateTrustScores();
   return scores[peerId] || 0;
