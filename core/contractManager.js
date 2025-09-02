@@ -1,7 +1,7 @@
-// dCent Core – Contract Management (mit Verschlüsselung + Signatur + Collateral)
+// dCent Core – Contract Management (mit Verschlüsselung + Signatur + Collateral + Status)
 
 import { getKey } from "./keyManager.js";
-import { saveToDB, getAllFromDB } from "./storage.js";
+import { saveToDB, getAllFromDB, getFromDB } from "./storage.js";
 import { lockCollateral } from "./collateralManager.js";
 
 const STORE_NAME = "contracts";
@@ -43,7 +43,7 @@ async function decryptAES(key, encryptedData, iv) {
 }
 
 //
-// -------- AES Key-Sharing (vereinfacht) --------
+// -------- AES Key-Sharing --------
 //
 async function encryptKeyForPeer(aesKey, peerId) {
   const peerKey = await getKey(peerId);
@@ -124,7 +124,7 @@ export async function createContract(fromId, toId, content, amount = 0, collater
   encryptedKeys[fromId] = await encryptKeyForPeer(aesKey, fromId);
   encryptedKeys[toId] = await encryptKeyForPeer(aesKey, toId);
 
-  // Collateral immer setzen
+  // Collateral
   let collateral = null;
   if (collateralAmount > 0) {
     collateral = {
@@ -141,7 +141,7 @@ export async function createContract(fromId, toId, content, amount = 0, collater
     }
   }
 
-  // Basisdaten inkl. Collateral
+  // Basisdaten inkl. Status
   const baseData = {
     id: contractId,
     from: fromId,
@@ -151,10 +151,12 @@ export async function createContract(fromId, toId, content, amount = 0, collater
     encryptedContent: encrypted.ciphertext,
     iv: encrypted.iv,
     encryptedKeys,
-    collateral // jetzt garantiert nicht mehr null, wenn collateralAmount > 0
+    collateral,
+    status: "pending", // neuer Vertrag startet immer als pending
+    approvals: {}      // speichert pro Partei: active/broken
   };
 
-  // Signatur erstellen
+  // Signatur
   const signature = await signData(fromKey.privateKey, baseData);
 
   const contract = {
@@ -172,19 +174,14 @@ export async function listContracts() {
   return await getAllFromDB(STORE_NAME);
 }
 
-// Vertrag entschlüsseln für einen Peer
+// Vertrag entschlüsseln
 export async function decryptContract(contract, peerId) {
   if (!contract.encryptedKeys[peerId]) {
     throw new Error("Peer ist nicht Teil dieses Vertrags");
   }
-
   const aesKey = await decryptKeyForPeer(contract.encryptedKeys[peerId], peerId);
   const plaintext = await decryptAES(aesKey, contract.encryptedContent, contract.iv);
-
-  return {
-    ...contract,
-    content: plaintext
-  };
+  return { ...contract, content: plaintext };
 }
 
 // Vertragssignatur prüfen
@@ -192,6 +189,33 @@ export async function verifyContractSignature(contract) {
   const { signature, signer, ...baseData } = contract;
   const signerKey = await getKey(signer);
   if (!signerKey) throw new Error(`Kein Key für ${signer}`);
-
   return await verifySignature(signerKey.publicKey, baseData, signature);
+}
+
+// Status setzen (active/broken)
+export async function setContractStatus(contractId, peerId, status) {
+  const contract = await getFromDB(STORE_NAME, contractId);
+  if (!contract) throw new Error("Vertrag nicht gefunden");
+  if (![contract.from, contract.to].includes(peerId)) {
+    throw new Error("Peer gehört nicht zum Vertrag");
+  }
+
+  contract.approvals = contract.approvals || {};
+  contract.approvals[peerId] = status;
+
+  // Logik: beide müssen active → Vertrag wird active
+  if (contract.approvals[contract.from] === "active" &&
+      contract.approvals[contract.to] === "active") {
+    contract.status = "active";
+  }
+  // Wenn einer broken → Vertrag wird broken
+  else if (Object.values(contract.approvals).includes("broken")) {
+    contract.status = "broken";
+  }
+  else {
+    contract.status = "pending";
+  }
+
+  await saveToDB(STORE_NAME, contract);
+  return contract;
 }
