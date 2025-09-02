@@ -192,7 +192,7 @@ export async function verifyContractSignature(contract) {
   return await verifySignature(signerKey.publicKey, baseData, signature);
 }
 
-// Status setzen (active/broken)
+// Status setzen (active/broken) mit Burn-light Logik
 export async function setContractStatus(contractId, peerId, status) {
   const contract = await getFromDB(STORE_NAME, contractId);
   if (!contract) throw new Error("Vertrag nicht gefunden");
@@ -203,15 +203,23 @@ export async function setContractStatus(contractId, peerId, status) {
   contract.approvals = contract.approvals || {};
   contract.approvals[peerId] = status;
 
-  // Logik: beide müssen active → Vertrag wird active
+  // Beide müssen "active" -> Vertrag wird aktiv, Collateral freigegeben
   if (contract.approvals[contract.from] === "active" &&
       contract.approvals[contract.to] === "active") {
     contract.status = "active";
+    if (contract.collateral) {
+      contract.collateral.status = "released";
+    }
   }
-  // Wenn einer broken → Vertrag wird broken
-  else if (Object.values(contract.approvals).includes("broken")) {
+  // Beide müssen "broken" -> Vertrag gebrochen, Collateral verbrannt
+  else if (contract.approvals[contract.from] === "broken" &&
+           contract.approvals[contract.to] === "broken") {
     contract.status = "broken";
+    if (contract.collateral) {
+      contract.collateral.status = "burned";
+    }
   }
+  // Sonst bleibt pending (eine Partei hat noch nicht zugestimmt)
   else {
     contract.status = "pending";
   }
