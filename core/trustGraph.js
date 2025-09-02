@@ -89,10 +89,13 @@ export async function calculateTrustScores() {
     let score = base * (1 + BETA * (d / Math.max(1, fulfilled || 1)));
 
     // Multisig Threshold-Bonus
+    let multisigBonus = 0;
     cs.forEach(c => {
       if (c.status === "active" && c.participants) {
         const thresholdRatio = c.threshold / c.participants.length;
-        score *= (1 + DELTA * thresholdRatio); // z. B. bei 3/3: +30 %, bei 2/3: +20 %
+        const bonusFactor = (1 + DELTA * thresholdRatio);
+        multisigBonus += Math.round(score * (bonusFactor - 1)); // zusätzliche Punkte durch Threshold
+        score *= bonusFactor;
       }
     });
 
@@ -112,7 +115,8 @@ export async function calculateTrustScores() {
       broken,
       d,
       totalCollateral,
-      base: Math.round(base)
+      base: Math.round(base),
+      multisigBonus
     };
   }
 
