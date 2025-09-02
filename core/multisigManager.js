@@ -1,5 +1,5 @@
 // dCent Core – Multisig (Gruppenverträge / Zellenstrukturen)
-// V0.5: Verträge mit mehreren Signern und Threshold
+// V0.6: Status-Integration (pending, active, broken)
 
 import { getKey } from "./keyManager.js";
 import { saveToDB, getFromDB, getAllFromDB } from "./storage.js";
@@ -70,7 +70,8 @@ export async function createMultisigContract(participants, threshold, content, a
     amount,
     collateral,
     created,
-    signatures: [], // leere Liste
+    signatures: [],
+    approvals: {},  // active / broken Votes
     status: "pending"
   };
 
@@ -79,7 +80,7 @@ export async function createMultisigContract(participants, threshold, content, a
 }
 
 //
-// Vertrag signieren
+// Vertrag signieren (aktive Zustimmung)
 //
 export async function signContract(contractId, signerId) {
   const contract = await getFromDB(STORE_NAME, contractId);
@@ -109,13 +110,52 @@ export async function signContract(contractId, signerId) {
     contract.signatures.push({ signer: signerId, signature });
   }
 
-  // Status prüfen
-  if (contract.signatures.length >= contract.threshold) {
+  // Zustimmung als "active"
+  contract.approvals[signerId] = "active";
+
+  await updateMultisigStatus(contract);
+  return contract;
+}
+
+//
+// Vertrag explizit als "broken" markieren
+//
+export async function breakContract(contractId, signerId) {
+  const contract = await getFromDB(STORE_NAME, contractId);
+  if (!contract) throw new Error("Vertrag nicht gefunden");
+  if (!contract.participants.includes(signerId)) {
+    throw new Error("Signer ist nicht Teilnehmer des Vertrags");
+  }
+
+  contract.approvals = contract.approvals || {};
+  contract.approvals[signerId] = "broken";
+
+  await updateMultisigStatus(contract);
+  return contract;
+}
+
+//
+// Hilfsfunktion: Status aktualisieren
+//
+async function updateMultisigStatus(contract) {
+  const approvals = Object.values(contract.approvals);
+
+  const activeVotes = approvals.filter(v => v === "active").length;
+  const brokenVotes = approvals.filter(v => v === "broken").length;
+
+  // active, wenn genug Signaturen >= threshold
+  if (activeVotes >= contract.threshold) {
     contract.status = "active";
+  }
+  // broken, wenn Mehrheit broken (z. B. > 50 % der Teilnehmer)
+  else if (brokenVotes > contract.participants.length / 2) {
+    contract.status = "broken";
+  }
+  else {
+    contract.status = "pending";
   }
 
   await saveToDB(STORE_NAME, contract);
-  return contract;
 }
 
 //
