@@ -33,15 +33,24 @@
     <input id="contractText" placeholder="Vertragsinhalt" />
     <input id="amount" placeholder="Betrag" type="number" />
     <input id="collateral" placeholder="Pfand (DZP)" type="number" />
-    <label>Status:</label>
-    <select id="status">
-      <option value="active">active</option>
-      <option value="pending">pending</option>
-      <option value="broken">broken</option>
-    </select>
-    <button onclick="createContractUI()">Vertrag anlegen</button>
+    <button onclick="createContractUI()">Vertrag anlegen (pending)</button>
     <button onclick="showContracts()">Alle Verträge anzeigen</button>
     <pre id="contractsOutput"></pre>
+  </div>
+
+  <!-- Vertrags-Status ändern -->
+  <div class="box">
+    <h3>Vertrags-Status ändern</h3>
+    <input id="contractId" placeholder="Contract-ID" />
+    <label>Peer:</label>
+    <select id="statusPeer"></select>
+    <label>Status:</label>
+    <select id="newStatus">
+      <option value="active">active</option>
+      <option value="broken">broken</option>
+    </select>
+    <button onclick="setStatusUI()">Status setzen</button>
+    <pre id="statusOutput"></pre>
   </div>
 
   <!-- Multisig-Verträge -->
@@ -84,7 +93,7 @@
 
   <script type="module">
     import { createKeyPair, listKeys, formatPeerLabel } from "./core/keyManager.js";
-    import { createContract, listContracts } from "./core/contractManager.js";
+    import { createContract, listContracts, setContractStatus } from "./core/contractManager.js";
     import { calculateTrustScores } from "./core/trustGraph.js";
     import { downloadBackup, uploadBackup } from "./core/storage.js";
     import { createMultisigContract, listMultisigContracts, signContract } from "./core/multisigManager.js";
@@ -95,8 +104,9 @@
       const fromSelect = document.getElementById("fromPeer");
       const toSelect = document.getElementById("toPeer");
       const multiSigner = document.getElementById("multiSigner");
+      const statusPeer = document.getElementById("statusPeer");
 
-      [fromSelect, toSelect, multiSigner].forEach(sel => sel.innerHTML = "");
+      [fromSelect, toSelect, multiSigner, statusPeer].forEach(sel => sel.innerHTML = "");
 
       peers.forEach(peer => {
         const option = document.createElement("option");
@@ -105,6 +115,7 @@
         fromSelect.appendChild(option.cloneNode(true));
         toSelect.appendChild(option.cloneNode(true));
         multiSigner.appendChild(option.cloneNode(true));
+        statusPeer.appendChild(option.cloneNode(true));
       });
     }
 
@@ -128,23 +139,32 @@
       const text = document.getElementById("contractText").value.trim();
       const amount = parseFloat(document.getElementById("amount").value) || 0;
 
-      // Collateral
       const collateralInput = document.getElementById("collateral").value;
       let collateral = 0;
       if (collateralInput && !isNaN(parseFloat(collateralInput))) {
         collateral = parseFloat(collateralInput);
       }
 
-      const status = document.getElementById("status").value;
-
       const ctr = await createContract(from, to, text, amount, collateral);
-      ctr.status = status; // direkt Status setzen
-      alert("Vertrag erstellt: " + ctr.id + " (Status: " + status + ")");
+      alert("Vertrag erstellt (pending) mit ID: " + ctr.id);
     };
 
     window.showContracts = async () => {
       const ctrs = await listContracts();
       document.getElementById("contractsOutput").innerText = JSON.stringify(ctrs, null, 2);
+    };
+
+    // Vertragsstatus ändern
+    window.setStatusUI = async () => {
+      const id = document.getElementById("contractId").value.trim();
+      const peerId = document.getElementById("statusPeer").value;
+      const status = document.getElementById("newStatus").value;
+      try {
+        const ctr = await setContractStatus(id, peerId, status);
+        document.getElementById("statusOutput").innerText = JSON.stringify(ctr, null, 2);
+      } catch (err) {
+        alert("Fehler: " + err.message);
+      }
     };
 
     // Multisig-Verträge
@@ -182,7 +202,6 @@
     // TrustScores
     window.showTrustScores = async () => {
       const { scores, details } = await calculateTrustScores();
-
       let output = "";
       for (const peer in scores) {
         const s = scores[peer];
@@ -190,12 +209,10 @@
         output += `${peer}\n`;
         output += `  Gesamt: ${s}\n`;
         output += `  Erfüllt: ${d.fulfilled}, Gebrochen: ${d.broken}\n`;
-        output += `  Diversität (d): ${d.d}\n`;
+        output += `  Diversität: ${d.d}\n`;
         output += `  Collateral gesamt: ${d.totalCollateral}\n`;
-        output += `  Basiswert (asymptotisch): ${d.base}\n`;
-        output += "\n";
+        output += `  Basiswert: ${d.base}\n\n`;
       }
-
       document.getElementById("trustOutput").innerText =
         output || "Keine Verträge gefunden.";
     };
