@@ -1,8 +1,8 @@
-// dCent Core – Contract Management (mit Verschlüsselung + Signatur + Collateral + Status)
+// dCent Core – Contract Management (mit Whitepaper-Collateral-Logik + Status)
 
 import { getKey } from "./keyManager.js";
 import { saveToDB, getAllFromDB, getFromDB } from "./storage.js";
-import { lockCollateral } from "./collateralManager.js";
+import { subtractCollateral, addCollateral } from "./collateralManager.js";
 
 const STORE_NAME = "contracts";
 
@@ -20,11 +20,7 @@ async function generateAESKey() {
 async function encryptAES(key, data) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(data);
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    key,
-    encoded
-  );
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded);
   return {
     ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
     iv: Array.from(iv)
@@ -34,11 +30,7 @@ async function encryptAES(key, data) {
 async function decryptAES(key, encryptedData, iv) {
   const bytes = Uint8Array.from(atob(encryptedData), c => c.charCodeAt(0));
   const ivArray = new Uint8Array(iv);
-  const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: ivArray },
-    key,
-    bytes
-  );
+  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: ivArray }, key, bytes);
   return new TextDecoder().decode(plaintext);
 }
 
@@ -54,13 +46,7 @@ async function encryptKeyForPeer(aesKey, peerId) {
 
 async function decryptKeyForPeer(encryptedKeyB64, peerId) {
   const rawKey = JSON.parse(atob(encryptedKeyB64));
-  return await crypto.subtle.importKey(
-    "jwk",
-    rawKey,
-    { name: "AES-GCM" },
-    true,
-    ["encrypt", "decrypt"]
-  );
+  return await crypto.subtle.importKey("jwk", rawKey, { name: "AES-GCM" }, true, ["encrypt", "decrypt"]);
 }
 
 //
@@ -74,14 +60,8 @@ async function signData(privateKeyJwk, data) {
     false,
     ["sign"]
   );
-
   const encoded = new TextEncoder().encode(JSON.stringify(data));
-  const signature = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    privateKey,
-    encoded
-  );
-
+  const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, privateKey, encoded);
   return btoa(String.fromCharCode(...new Uint8Array(signature)));
 }
 
@@ -93,16 +73,9 @@ async function verifySignature(publicKeyJwk, data, signatureB64) {
     true,
     ["verify"]
   );
-
   const encoded = new TextEncoder().encode(JSON.stringify(data));
   const sigBytes = Uint8Array.from(atob(signatureB64), c => c.charCodeAt(0));
-
-  return await crypto.subtle.verify(
-    { name: "ECDSA", hash: "SHA-256" },
-    publicKey,
-    sigBytes,
-    encoded
-  );
+  return await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, publicKey, sigBytes, encoded);
 }
 
 //
@@ -124,20 +97,18 @@ export async function createContract(fromId, toId, content, amount = 0, collater
   encryptedKeys[fromId] = await encryptKeyForPeer(aesKey, fromId);
   encryptedKeys[toId] = await encryptKeyForPeer(aesKey, toId);
 
-  // Collateral
+  // Collateral nur vom Sender ("from") abziehen
   let collateral = null;
   if (collateralAmount > 0) {
-    collateral = {
-      from: collateralAmount,
-      to: collateralAmount,
-      status: "locked"
-    };
-
     try {
-      await lockCollateral(contractId, fromId, collateralAmount);
-      await lockCollateral(contractId, toId, collateralAmount);
+      await subtractCollateral(fromId, collateralAmount); // vom Guthaben abziehen
+      collateral = {
+        from: collateralAmount,
+        to: 0,
+        status: "locked"
+      };
     } catch (err) {
-      console.warn("Collateral konnte nicht gelockt werden:", err);
+      console.warn("Collateral konnte nicht abgezogen werden:", err);
     }
   }
 
@@ -152,8 +123,8 @@ export async function createContract(fromId, toId, content, amount = 0, collater
     iv: encrypted.iv,
     encryptedKeys,
     collateral,
-    status: "pending", // neuer Vertrag startet immer als pending
-    approvals: {}      // speichert pro Partei: active/broken
+    status: "pending",
+    approvals: {}
   };
 
   // Signatur
@@ -192,7 +163,7 @@ export async function verifyContractSignature(contract) {
   return await verifySignature(signerKey.publicKey, baseData, signature);
 }
 
-// Status setzen (active/broken) mit Burn-light Logik
+// Status setzen (active/broken) mit Whitepaper-Collateral-Logik
 export async function setContractStatus(contractId, peerId, status) {
   const contract = await getFromDB(STORE_NAME, contractId);
   if (!contract) throw new Error("Vertrag nicht gefunden");
@@ -203,15 +174,18 @@ export async function setContractStatus(contractId, peerId, status) {
   contract.approvals = contract.approvals || {};
   contract.approvals[peerId] = status;
 
-  // Beide müssen "active" -> Vertrag wird aktiv, Collateral freigegeben
+  // Beide Parteien müssen active → Vertrag erfüllt
   if (contract.approvals[contract.from] === "active" &&
       contract.approvals[contract.to] === "active") {
     contract.status = "active";
-    if (contract.collateral) {
+    if (contract.collateral && contract.collateral.status === "locked") {
+      await addCollateral(contract.to, contract.collateral.from); // Empfänger bekommt Collateral
       contract.collateral.status = "released";
+      contract.collateral.to = contract.collateral.from;
+      contract.collateral.from = 0;
     }
   }
-  // Beide müssen "broken" -> Vertrag gebrochen, Collateral verbrannt
+  // Beide Parteien müssen broken → Vertrag gebrochen → Collateral verbrannt
   else if (contract.approvals[contract.from] === "broken" &&
            contract.approvals[contract.to] === "broken") {
     contract.status = "broken";
@@ -219,9 +193,8 @@ export async function setContractStatus(contractId, peerId, status) {
       contract.collateral.status = "burned";
     }
   }
-  // Sonst bleibt pending (eine Partei hat noch nicht zugestimmt)
   else {
-    contract.status = "pending";
+    contract.status = "pending"; // solange nur eine Seite entschieden hat
   }
 
   await saveToDB(STORE_NAME, contract);
