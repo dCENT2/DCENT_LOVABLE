@@ -23,6 +23,18 @@
     <pre id="keysOutput"></pre>
   </div>
 
+  <!-- Collateral Wallet -->
+  <div class="box">
+    <h3>Collateral Wallets</h3>
+    <button onclick="showWallets()">Alle Wallets anzeigen</button><br/>
+    <label>Peer:</label>
+    <select id="walletPeer"></select>
+    <label>Betrag:</label>
+    <input id="walletAmount" type="number" value="100" />
+    <button onclick="fundWallet()">Aufladen (Test)</button>
+    <pre id="walletOutput"></pre>
+  </div>
+
   <!-- Normaler Vertrag -->
   <div class="box">
     <h3>Vertrag (einfach)</h3>
@@ -97,6 +109,8 @@
     import { calculateTrustScores } from "./core/trustGraph.js";
     import { downloadBackup, uploadBackup } from "./core/storage.js";
     import { createMultisigContract, listMultisigContracts, signContract } from "./core/multisigManager.js";
+    import { getAllFromDB } from "./core/storage.js";
+    import { addCollateral, getCollateral } from "./core/collateralManager.js";
 
     // Dropdowns aktualisieren
     async function refreshPeerDropdowns() {
@@ -105,8 +119,9 @@
       const toSelect = document.getElementById("toPeer");
       const multiSigner = document.getElementById("multiSigner");
       const statusPeer = document.getElementById("statusPeer");
+      const walletPeer = document.getElementById("walletPeer");
 
-      [fromSelect, toSelect, multiSigner, statusPeer].forEach(sel => sel.innerHTML = "");
+      [fromSelect, toSelect, multiSigner, statusPeer, walletPeer].forEach(sel => sel.innerHTML = "");
 
       peers.forEach(peer => {
         const option = document.createElement("option");
@@ -116,6 +131,7 @@
         toSelect.appendChild(option.cloneNode(true));
         multiSigner.appendChild(option.cloneNode(true));
         statusPeer.appendChild(option.cloneNode(true));
+        walletPeer.appendChild(option.cloneNode(true));
       });
     }
 
@@ -130,6 +146,21 @@
     window.showKeys = async () => {
       const keys = await listKeys();
       document.getElementById("keysOutput").innerText = JSON.stringify(keys, null, 2);
+    };
+
+    // Wallets
+    window.showWallets = async () => {
+      const wallets = await getAllFromDB("collateral");
+      document.getElementById("walletOutput").innerText = JSON.stringify(wallets, null, 2);
+    };
+    window.fundWallet = async () => {
+      const peerId = document.getElementById("walletPeer").value;
+      const amount = parseFloat(document.getElementById("walletAmount").value) || 0;
+      if (!peerId || amount <= 0) return alert("Bitte gültige Daten eingeben");
+      await addCollateral(peerId, amount);
+      const balance = await getCollateral(peerId);
+      alert(`Wallet von ${peerId} aufgeladen. Neuer Stand: ${balance}`);
+      await window.showWallets();
     };
 
     // Normaler Vertrag
