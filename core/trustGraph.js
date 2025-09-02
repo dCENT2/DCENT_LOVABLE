@@ -1,27 +1,31 @@
-// dCent Core – TrustGraph (Whitepaper-konform)
-// Proof-of-Trust mit asymptotischem Wachstum, Diversität und Collateral
+// dCent Core – TrustGraph (Whitepaper-konform mit Status-Logik)
+// Proof-of-Trust mit asymptotischem Wachstum, Diversität, Collateral und Strafe bei gebrochenen Verträgen
 
 import { listContracts } from "./contractManager.js";
 
-// Parameter (können wir später feinjustieren oder in Settings speichern)
-const MAX_TRUST = 100;       // asymptotisches Maximum
-const K = 0.15;              // Wachstumsrate
-const ALPHA = 0.05;          // Collateral-Faktor (5% Bonus pro DZP)
-const BETA = 0.2;            // Diversitäts-Faktor
+// Parameter (feinjustierbar)
+const MAX_TRUST = 100;   // asymptotisches Maximum
+const K = 0.15;          // Basis-Wachstumsrate
+const ALPHA = 0.05;      // Collateral-Faktor (logarithmische Dehnung)
+const BETA = 0.2;        // Diversitäts-Faktor
+const GAMMA = 0.2;       // Strafe pro gebrochenem Vertrag (20 % vom Score)
 
-// Hilfsfunktion: asymptotisches Wachstum
-function baseTrust(n) {
-  return MAX_TRUST * (1 - Math.exp(-K * n));
+// Asymptotische Funktion mit Collateral-Dehnung
+function baseTrust(n, totalCollateral) {
+  const fCollateral = ALPHA * Math.log(1 + totalCollateral); // Collateral dehnt die Kurve
+  const effectiveK = K + fCollateral;
+  return MAX_TRUST * (1 - Math.exp(-effectiveK * n));
 }
 
 // Hauptberechnung
 export async function calculateTrustScores() {
   const contracts = await listContracts();
-  const peerContracts = {};  // { peerId: [contracts...] }
+  const peerContracts = {};
 
   // Verträge pro Peer sammeln
   contracts.forEach(contract => {
     [contract.from, contract.to].forEach(peer => {
+      if (!peer) return; // undefined vermeiden
       if (!peerContracts[peer]) peerContracts[peer] = [];
       peerContracts[peer].push(contract);
     });
@@ -31,35 +35,54 @@ export async function calculateTrustScores() {
   const details = {};
 
   for (const peer in peerContracts) {
-    const contracts = peerContracts[peer];
-    const n = contracts.length;
+    const cs = peerContracts[peer];
 
-    // Diversität: Anzahl verschiedener Partner
+    // Zählen: nur nach Status
+    const fulfilled = cs.filter(c => c.status === "active").length;
+    const broken = cs.filter(c => c.status === "broken").length;
+
+    // Diversität: nur aus aktiven Verträgen
     const partners = new Set();
-    contracts.forEach(c => {
-      partners.add(c.from === peer ? c.to : c.from);
+    cs.forEach(c => {
+      if (c.status === "active") {
+        partners.add(c.from === peer ? c.to : c.from);
+      }
     });
     const d = partners.size;
 
-    // Collateral-Bonus (Summe aller Pfänder dieses Peers)
+    // Collateral: nur aus aktiven Verträgen
     let totalCollateral = 0;
-    contracts.forEach(c => {
-      if (c.collateral) {
+    cs.forEach(c => {
+      if (c.status === "active" && c.collateral) {
         if (c.from === peer) totalCollateral += c.collateral.from || 0;
         if (c.to === peer) totalCollateral += c.collateral.to || 0;
       }
     });
 
-    // Basiswert aus Anzahl Verträge
-    const base = baseTrust(n);
+    // Basiswert aus erfüllten Verträgen
+    const base = baseTrust(fulfilled, totalCollateral);
 
-    // Score mit Collateral & Diversität
-    let score = base;
-    score *= 1 + ALPHA * totalCollateral;   // Collateral-Faktor
-    score *= 1 + BETA * (d / Math.max(1, n)); // Diversitäts-Faktor
+    // Diversitätsbonus
+    let score = base * (1 + BETA * (d / Math.max(1, fulfilled || 1)));
+
+    // Strafe für gebrochene Verträge
+    if (broken > 0) {
+      const penalty = GAMMA * broken * score;
+      score -= penalty;
+    }
+
+    // Score begrenzen
+    if (score < 0) score = 0;
+    if (score > MAX_TRUST) score = MAX_TRUST;
 
     scores[peer] = Math.round(score);
-    details[peer] = { n, d, totalCollateral, base: Math.round(base) };
+    details[peer] = {
+      fulfilled,
+      broken,
+      d,
+      totalCollateral,
+      base: Math.round(base)
+    };
   }
 
   return { scores, details };
