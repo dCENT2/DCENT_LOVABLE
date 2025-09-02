@@ -63,6 +63,7 @@
     </select>
     <button onclick="setStatusUI()">Status setzen</button>
     <pre id="statusOutput"></pre>
+    <pre id="collateralStatusOutput"></pre>
   </div>
 
   <!-- Multisig-Verträge -->
@@ -107,9 +108,8 @@
     import { createKeyPair, listKeys, formatPeerLabel } from "./core/keyManager.js";
     import { createContract, listContracts, setContractStatus } from "./core/contractManager.js";
     import { calculateTrustScores } from "./core/trustGraph.js";
-    import { downloadBackup, uploadBackup } from "./core/storage.js";
+    import { downloadBackup, uploadBackup, getAllFromDB } from "./core/storage.js";
     import { createMultisigContract, listMultisigContracts, signContract } from "./core/multisigManager.js";
-    import { getAllFromDB } from "./core/storage.js";
     import { addCollateral, getCollateral } from "./core/collateralManager.js";
 
     // Dropdowns aktualisieren
@@ -185,7 +185,7 @@
       document.getElementById("contractsOutput").innerText = JSON.stringify(ctrs, null, 2);
     };
 
-    // Vertragsstatus ändern
+    // Vertragsstatus ändern + Collateral-Anzeige
     window.setStatusUI = async () => {
       const id = document.getElementById("contractId").value.trim();
       const peerId = document.getElementById("statusPeer").value;
@@ -193,6 +193,13 @@
       try {
         const ctr = await setContractStatus(id, peerId, status);
         document.getElementById("statusOutput").innerText = JSON.stringify(ctr, null, 2);
+
+        if (ctr.collateral) {
+          document.getElementById("collateralStatusOutput").innerText =
+            `Collateral Status: ${ctr.collateral.status}, Betrag: ${ctr.collateral.to || ctr.collateral.from}`;
+        } else {
+          document.getElementById("collateralStatusOutput").innerText = "Kein Collateral gesetzt.";
+        }
       } catch (err) {
         alert("Fehler: " + err.message);
       }
